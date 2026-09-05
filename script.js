@@ -5,7 +5,7 @@ let temperature = parseFloat(localStorage.getItem('temperature')) || 0.7;
 let chatHistory = [];
 let uploadedFiles = [];
 let isProcessing = false;
-let selectedModel = 'gemini-2.0-flash'; // Model terbaru
+let selectedModel = 'gemini-3.6-flash'; // Model terbaru
 
 // ===== DOM REFS =====
 const chatBox = document.getElementById('chatBox');
@@ -30,6 +30,11 @@ systemPromptInput.value = systemPrompt;
 temperatureInput.value = temperature;
 tempValue.textContent = temperature;
 
+// Set model default di select
+if (modelSelect) {
+    modelSelect.value = selectedModel;
+}
+
 loadChatHistory();
 updateStatus();
 
@@ -53,6 +58,15 @@ temperatureInput.addEventListener('input', (e) => {
     localStorage.setItem('temperature', temperature);
 });
 clearChatBtn.addEventListener('click', clearChat);
+
+// Model selector
+if (modelSelect) {
+    modelSelect.addEventListener('change', (e) => {
+        selectedModel = e.target.value;
+        localStorage.setItem('selected_model', selectedModel);
+        addMessage('ai', `🔄 Model diubah ke: ${selectedModel}`);
+    });
+}
 
 // ===== CORE FUNCTIONS =====
 async function handleSendMessage() {
@@ -86,20 +100,53 @@ async function handleSendMessage() {
         let errorMsg = error.message;
         
         // Handle model not found error
-        if (errorMsg.includes('not found') || errorMsg.includes('not supported')) {
-            errorMsg = '❌ Model tidak ditemukan. Mencoba model alternatif...';
-            addMessage('ai', errorMsg);
+        if (errorMsg.includes('no longer available') || errorMsg.includes('not found') || errorMsg.includes('not supported')) {
+            // Extract suggested model from error if any
+            const suggestedMatch = errorMsg.match(/models\/(gemini-\d+\.\d+-flash)/i);
+            let suggestedModel = suggestedMatch ? suggestedMatch[1] : null;
             
-            // Try fallback models
-            const fallbackModels = ['gemini-1.5-pro', 'gemini-1.5-flash-001', 'gemini-pro'];
+            if (suggestedModel) {
+                addMessage('ai', `🔄 Mencoba model: ${suggestedModel}...`);
+                try {
+                    const response = await callGeminiAPI(text, files, suggestedModel);
+                    hideTypingIndicator();
+                    addMessage('ai', `✅ Berhasil dengan model ${suggestedModel}\n\n${response}`);
+                    // Update select
+                    if (modelSelect) {
+                        modelSelect.value = suggestedModel;
+                        selectedModel = suggestedModel;
+                        localStorage.setItem('selected_model', suggestedModel);
+                    }
+                    saveChatHistory();
+                    return;
+                } catch (e) {
+                    // Fallback ke model lain
+                }
+            }
+            
+            // Fallback models list (update sesuai yang tersedia)
+            const fallbackModels = [
+                'gemini-3.6-flash',
+                'gemini-3.5-flash',
+                'gemini-2.5-flash',
+                'gemini-1.5-pro',
+                'gemini-1.5-flash'
+            ];
+            
             let success = false;
-            
             for (const model of fallbackModels) {
+                if (model === selectedModel) continue;
                 try {
                     addMessage('ai', `🔄 Mencoba model: ${model}...`);
                     const response = await callGeminiAPI(text, files, model);
                     hideTypingIndicator();
-                    addMessage('ai', response);
+                    addMessage('ai', `✅ Berhasil dengan model ${model}\n\n${response}`);
+                    // Update select
+                    if (modelSelect) {
+                        modelSelect.value = model;
+                        selectedModel = model;
+                        localStorage.setItem('selected_model', model);
+                    }
                     success = true;
                     break;
                 } catch (e) {
@@ -108,7 +155,7 @@ async function handleSendMessage() {
             }
             
             if (!success) {
-                addMessage('ai', '❌ Semua model gagal. Pastikan API Key valid dan coba lagi nanti.');
+                addMessage('ai', '❌ Semua model gagal. Silakan cek:\n1. API Key valid\n2. Koneksi internet\n3. Coba refresh halaman');
             }
         } else {
             addMessage('ai', `❌ Error: ${errorMsg}`);
@@ -121,23 +168,22 @@ async function handleSendMessage() {
 }
 
 async function callGeminiAPI(text, files, model = null) {
-    // Gunakan model yang dipilih atau default
     const modelToUse = model || selectedModel;
     
-    // List model yang didukung (update sesuai availability)
+    // Daftar model yang didukung (update berkala)
     const supportedModels = [
-        'gemini-2.0-flash',
+        'gemini-3.6-flash',
+        'gemini-3.5-flash',
+        'gemini-2.5-flash',
         'gemini-1.5-pro',
-        'gemini-1.5-flash',
-        'gemini-1.5-flash-001',
-        'gemini-pro'
+        'gemini-1.5-flash'
     ];
     
-    // Coba model yang diminta, jika error coba fallback
     let currentModel = modelToUse;
     let lastError = null;
     
-    for (let i = 0; i < Math.min(supportedModels.length, 3); i++) {
+    // Coba model yang diminta, jika error coba fallback
+    for (let attempt = 0; attempt < supportedModels.length; attempt++) {
         try {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`;
             
@@ -189,13 +235,23 @@ async function callGeminiAPI(text, files, model = null) {
                 const errorData = await response.json();
                 const errorMsg = errorData.error?.message || `HTTP ${response.status}`;
                 
-                // Jika model not found, coba model berikutnya
-                if (errorMsg.includes('not found') || errorMsg.includes('not supported')) {
+                // Jika model tidak tersedia, coba yang lain
+                if (errorMsg.includes('no longer available') || 
+                    errorMsg.includes('not found') || 
+                    errorMsg.includes('not supported')) {
+                    
+                    // Coba ekstrak model yang disarankan dari pesan error
+                    const suggestedMatch = errorMsg.match(/models\/(gemini-\d+\.\d+-flash)/i);
+                    if (suggestedMatch && supportedModels.includes(suggestedMatch[1])) {
+                        currentModel = suggestedMatch[1];
+                        continue;
+                    }
+                    
                     lastError = errorMsg;
-                    // Pindah ke model berikutnya dalam daftar
-                    const nextIndex = supportedModels.indexOf(currentModel) + 1;
-                    if (nextIndex < supportedModels.length) {
-                        currentModel = supportedModels[nextIndex];
+                    // Coba model berikutnya
+                    const currentIndex = supportedModels.indexOf(currentModel);
+                    if (currentIndex < supportedModels.length - 1) {
+                        currentModel = supportedModels[currentIndex + 1];
                         continue;
                     }
                     throw new Error(`Model tidak tersedia. Coba: ${supportedModels.join(', ')}`);
@@ -207,11 +263,13 @@ async function callGeminiAPI(text, files, model = null) {
             return data.candidates[0].content.parts[0].text || 'Maaf, tidak ada respons.';
             
         } catch (error) {
-            if (error.message.includes('not found') || error.message.includes('not supported')) {
+            if (error.message.includes('no longer available') || 
+                error.message.includes('not found') || 
+                error.message.includes('not supported')) {
                 // Coba model berikutnya
-                const nextIndex = supportedModels.indexOf(currentModel) + 1;
-                if (nextIndex < supportedModels.length) {
-                    currentModel = supportedModels[nextIndex];
+                const currentIndex = supportedModels.indexOf(currentModel);
+                if (currentIndex < supportedModels.length - 1) {
+                    currentModel = supportedModels[currentIndex + 1];
                     continue;
                 }
                 throw new Error(`Tidak ada model yang tersedia. Coba: ${supportedModels.join(', ')}`);
@@ -220,15 +278,15 @@ async function callGeminiAPI(text, files, model = null) {
         }
     }
     
-    throw new Error('Gagal memanggil AI setelah mencoba beberapa model.');
+    throw new Error(`Gagal memanggil AI. Coba model: ${supportedModels.join(', ')}`);
 }
 
-// ===== UI HELPERS (Sama seperti sebelumnya) =====
+// ===== UI HELPERS =====
 function addMessage(role, content, files = []) {
     const div = document.createElement('div');
     div.className = `message ${role}`;
     
-    if (files.length > 0) {
+    if (files && files.length > 0) {
         files.forEach(file => {
             if (file.type && file.type.startsWith('image/')) {
                 const reader = new FileReader();
@@ -238,7 +296,7 @@ function addMessage(role, content, files = []) {
                     div.appendChild(img);
                 };
                 reader.readAsDataURL(file);
-            } else {
+            } else if (file instanceof File) {
                 const info = document.createElement('div');
                 info.className = 'file-info';
                 info.textContent = `📎 ${file.name} (${(file.size / 1024).toFixed(0)}KB)`;
@@ -346,67 +404,26 @@ function handleFileUpload(e) {
             return;
         }
         uploadedFiles.push(file);
+        renderFileTags();
+    });
+    fileInput.value = '';
+}
+
+function renderFileTags() {
+    filePreview.innerHTML = '';
+    uploadedFiles.forEach((file, index) => {
         const tag = document.createElement('div');
         tag.className = 'file-tag';
         tag.innerHTML = `
             📎 ${file.name} (${(file.size / 1024).toFixed(0)}KB)
-            <span class="remove-file" data-index="${uploadedFiles.length - 1}">×</span>
+            <span class="remove-file" data-index="${index}">×</span>
         `;
         filePreview.appendChild(tag);
-        tag.querySelector('.remove-file').addEventListener('click', (e) => {
-            const idx = parseInt(e.target.dataset.index);
-            uploadedFiles.splice(idx, 1);
-            // Refresh preview
-            filePreview.innerHTML = '';
-            uploadedFiles.forEach((f, i) => {
-                const newTag = document.createElement('div');
-                newTag.className = 'file-tag';
-                newTag.innerHTML = `
-                    📎 ${f.name} (${(f.size / 1024).toFixed(0)}KB)
-                    <span class="remove-file" data-index="${i}">×</span>
-                `;
-                filePreview.appendChild(newTag);
-                newTag.querySelector('.remove-file').addEventListener('click', (e) => {
-                    const idx = parseInt(e.target.dataset.index);
-                    uploadedFiles.splice(idx, 1);
-                    filePreview.innerHTML = '';
-                    uploadedFiles.forEach((f2, i2) => {
-                        const newTag2 = document.createElement('div');
-                        newTag2.className = 'file-tag';
-                        newTag2.innerHTML = `
-                            📎 ${f2.name} (${(f2.size / 1024).toFixed(0)}KB)
-                            <span class="remove-file" data-index="${i2}">×</span>
-                        `;
-                        filePreview.appendChild(newTag2);
-                        newTag2.querySelector('.remove-file').addEventListener('click', (e) => {
-                            const idx = parseInt(e.target.dataset.index);
-                            uploadedFiles.splice(idx, 1);
-                            filePreview.innerHTML = '';
-                            // Re-render semua
-                            uploadedFiles.forEach((f3, i3) => {
-                                const tag3 = document.createElement('div');
-                                tag3.className = 'file-tag';
-                                tag3.innerHTML = `
-                                    📎 ${f3.name} (${(f3.size / 1024).toFixed(0)}KB)
-                                    <span class="remove-file" data-index="${i3}">×</span>
-                                `;
-                                filePreview.appendChild(tag3);
-                                tag3.querySelector('.remove-file').addEventListener('click', (e) => {
-                                    const idx = parseInt(e.target.dataset.index);
-                                    uploadedFiles.splice(idx, 1);
-                                    filePreview.innerHTML = '';
-                                    // Re-render lagi...
-                                    // Simpel: reload file input
-                                    handleFileUpload(e);
-                                });
-                            });
-                        });
-                    });
-                });
-            });
+        tag.querySelector('.remove-file').addEventListener('click', () => {
+            uploadedFiles.splice(index, 1);
+            renderFileTags();
         });
     });
-    fileInput.value = '';
 }
 
 // Auto-resize textarea
@@ -414,3 +431,10 @@ messageInput.addEventListener('input', () => {
     messageInput.style.height = 'auto';
     messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
 });
+
+// Load saved model
+const savedModel = localStorage.getItem('selected_model');
+if (savedModel && modelSelect) {
+    modelSelect.value = savedModel;
+    selectedModel = savedModel;
+}
