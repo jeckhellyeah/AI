@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Pribadi - Gemini</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+    <div id="app">
+        <!-- Sidebar Settings -->
+        <div id="sidebar">
+            <h2>⚙️ Pengaturan</h2>
+            <div class="setting-group">
+                <label>🔑 API Key</label>
+                <input type="password" id="apiKeyInput" placeholder="Masukkan API Key" />
+                <button id="saveKeyBtn">Simpan</button>
+            </div>
+            <div class="setting-group">
+                <label>📝 Prompt System</label>
+                <textarea id="systemPrompt" rows="4" placeholder="Instruksi untuk AI...">Kamu adalah asisten AI yang membantu, ramah, dan profesional.</textarea>
+                <button id="savePromptBtn">Simpan Prompt</button>
+            </div>
+            <div class="setting-group">
+                <label>🌡️ Temperature</label>
+                <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.7" />
+                <span id="tempValue">0.7</span>
+            </div>
+            <button id="clearChatBtn" class="danger-btn">🗑️ Hapus Chat</button>
+        </div>
+
+        <!-- Main Chat Area -->
+        <div id="main">
+            <div id="chatHeader">
+                <h1>🤖 AI Pribadi</h1>
+                <span id="status">● Siap</span>
+            </div>
+            <div id="chatBox"></div>
+            <div id="inputArea">
+                <div id="filePreview"></div>
+                <div id="inputRow">
+                    <button id="uploadBtn" title="Upload Gambar/File">📎</button>
+                    <input type="file" id="fileInput" accept="image/*,.pdf,.txt,.doc,.docx" multiple hidden />
+                    <textarea id="messageInput" placeholder="Ketik pesan..." rows="2"></textarea>
+                    <button id="sendBtn">📤 Kirim</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
