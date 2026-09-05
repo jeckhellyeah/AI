@@ -5,6 +5,7 @@ let temperature = parseFloat(localStorage.getItem('temperature')) || 0.7;
 let chatHistory = [];
 let uploadedFiles = [];
 let isProcessing = false;
+let selectedModel = 'gemini-2.0-flash'; // Model terbaru
 
 // ===== DOM REFS =====
 const chatBox = document.getElementById('chatBox');
@@ -21,6 +22,7 @@ const temperatureInput = document.getElementById('temperature');
 const tempValue = document.getElementById('tempValue');
 const clearChatBtn = document.getElementById('clearChatBtn');
 const statusEl = document.getElementById('status');
+const modelSelect = document.getElementById('modelSelect');
 
 // ===== INIT =====
 apiKeyInput.value = apiKey;
@@ -32,7 +34,6 @@ loadChatHistory();
 updateStatus();
 
 // ===== EVENT LISTENERS =====
-// Send Message
 sendBtn.addEventListener('click', handleSendMessage);
 messageInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -41,11 +42,9 @@ messageInput.addEventListener('keydown', (e) => {
     }
 });
 
-// Upload Files
 uploadBtn.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', handleFileUpload);
 
-// Settings
 saveKeyBtn.addEventListener('click', saveApiKey);
 savePromptBtn.addEventListener('click', saveSystemPrompt);
 temperatureInput.addEventListener('input', (e) => {
@@ -55,7 +54,7 @@ temperatureInput.addEventListener('input', (e) => {
 });
 clearChatBtn.addEventListener('click', clearChat);
 
-// ===== FUNCTIONS =====
+// ===== CORE FUNCTIONS =====
 async function handleSendMessage() {
     const text = messageInput.value.trim();
     if (!text && uploadedFiles.length === 0) return;
@@ -73,7 +72,6 @@ async function handleSendMessage() {
     filePreview.innerHTML = '';
     fileInput.value = '';
 
-    // Show typing indicator
     showTypingIndicator();
     isProcessing = true;
     updateStatus('processing');
@@ -85,7 +83,36 @@ async function handleSendMessage() {
         saveChatHistory();
     } catch (error) {
         hideTypingIndicator();
-        addMessage('ai', `❌ Error: ${error.message}`);
+        let errorMsg = error.message;
+        
+        // Handle model not found error
+        if (errorMsg.includes('not found') || errorMsg.includes('not supported')) {
+            errorMsg = '❌ Model tidak ditemukan. Mencoba model alternatif...';
+            addMessage('ai', errorMsg);
+            
+            // Try fallback models
+            const fallbackModels = ['gemini-1.5-pro', 'gemini-1.5-flash-001', 'gemini-pro'];
+            let success = false;
+            
+            for (const model of fallbackModels) {
+                try {
+                    addMessage('ai', `🔄 Mencoba model: ${model}...`);
+                    const response = await callGeminiAPI(text, files, model);
+                    hideTypingIndicator();
+                    addMessage('ai', response);
+                    success = true;
+                    break;
+                } catch (e) {
+                    continue;
+                }
+            }
+            
+            if (!success) {
+                addMessage('ai', '❌ Semua model gagal. Pastikan API Key valid dan coba lagi nanti.');
+            }
+        } else {
+            addMessage('ai', `❌ Error: ${errorMsg}`);
+        }
         console.error(error);
     } finally {
         isProcessing = false;
@@ -93,112 +120,110 @@ async function handleSendMessage() {
     }
 }
 
-function handleFileUpload(e) {
-    const files = Array.from(e.target.files);
-    files.forEach(file => {
-        if (file.size > 5 * 1024 * 1024) {
-            alert(`File ${file.name} terlalu besar (max 5MB)`);
-            return;
-        }
-        uploadedFiles.push(file);
-        const tag = document.createElement('div');
-        tag.className = 'file-tag';
-        tag.innerHTML = `
-            📎 ${file.name} (${(file.size / 1024).toFixed(0)}KB)
-            <span class="remove-file" data-index="${uploadedFiles.length - 1}">×</span>
-        `;
-        filePreview.appendChild(tag);
-        tag.querySelector('.remove-file').addEventListener('click', (e) => {
-            const idx = parseInt(e.target.dataset.index);
-            uploadedFiles.splice(idx, 1);
-            filePreview.innerHTML = '';
-            uploadedFiles.forEach((f, i) => {
-                const newTag = document.createElement('div');
-                newTag.className = 'file-tag';
-                newTag.innerHTML = `
-                    📎 ${f.name} (${(f.size / 1024).toFixed(0)}KB)
-                    <span class="remove-file" data-index="${i}">×</span>
-                `;
-                filePreview.appendChild(newTag);
-                newTag.querySelector('.remove-file').addEventListener('click', (e) => {
-                    const idx = parseInt(e.target.dataset.index);
-                    uploadedFiles.splice(idx, 1);
-                    filePreview.innerHTML = '';
-                    uploadedFiles.forEach((f, i) => {
-                        // re-render ulang (simplifikasi)
+async function callGeminiAPI(text, files, model = null) {
+    // Gunakan model yang dipilih atau default
+    const modelToUse = model || selectedModel;
+    
+    // List model yang didukung (update sesuai availability)
+    const supportedModels = [
+        'gemini-2.0-flash',
+        'gemini-1.5-pro',
+        'gemini-1.5-flash',
+        'gemini-1.5-flash-001',
+        'gemini-pro'
+    ];
+    
+    // Coba model yang diminta, jika error coba fallback
+    let currentModel = modelToUse;
+    let lastError = null;
+    
+    for (let i = 0; i < Math.min(supportedModels.length, 3); i++) {
+        try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`;
+            
+            const parts = [];
+            parts.push({ text: systemPrompt });
+            parts.push({ text: text || 'Analisis file berikut:' });
+
+            // Process files
+            for (const file of files) {
+                const base64 = await fileToBase64(file);
+                const mimeType = file.type || 'application/octet-stream';
+                
+                if (file.type.startsWith('image/')) {
+                    parts.push({
+                        inlineData: {
+                            mimeType: mimeType,
+                            data: base64.split(',')[1]
+                        }
                     });
-                    // Reload ulang
-                    handleFileUpload(e);
-                });
-            });
-        });
-    });
-    fileInput.value = '';
-}
-
-async function callGeminiAPI(text, files) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-
-    // Build content parts
-    const parts = [];
-    
-    // System instruction
-    parts.push({ text: systemPrompt });
-    
-    // User message
-    parts.push({ text: text || 'Analisis file berikut:' });
-
-    // Process files
-    for (const file of files) {
-        const base64 = await fileToBase64(file);
-        const mimeType = file.type || 'application/octet-stream';
-        
-        if (file.type.startsWith('image/')) {
-            parts.push({
-                inlineData: {
-                    mimeType: mimeType,
-                    data: base64.split(',')[1]
+                } else {
+                    try {
+                        const textContent = await file.text();
+                        parts.push({ text: `\n[File: ${file.name}]\n${textContent.substring(0, 5000)}` });
+                    } catch {
+                        parts.push({ text: `\n[File: ${file.name}] (tidak bisa dibaca sebagai teks)` });
+                    }
                 }
-            });
-        } else {
-            // For non-image files, read as text if possible
-            try {
-                const textContent = await file.text();
-                parts.push({ text: `\n[File: ${file.name}]\n${textContent.substring(0, 5000)}` });
-            } catch {
-                parts.push({ text: `\n[File: ${file.name}] (tidak bisa dibaca sebagai teks)` });
             }
+
+            const payload = {
+                contents: [{
+                    parts: parts
+                }],
+                generationConfig: {
+                    temperature: temperature,
+                    maxOutputTokens: 2048,
+                    topK: 40,
+                    topP: 0.95
+                }
+            };
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                const errorMsg = errorData.error?.message || `HTTP ${response.status}`;
+                
+                // Jika model not found, coba model berikutnya
+                if (errorMsg.includes('not found') || errorMsg.includes('not supported')) {
+                    lastError = errorMsg;
+                    // Pindah ke model berikutnya dalam daftar
+                    const nextIndex = supportedModels.indexOf(currentModel) + 1;
+                    if (nextIndex < supportedModels.length) {
+                        currentModel = supportedModels[nextIndex];
+                        continue;
+                    }
+                    throw new Error(`Model tidak tersedia. Coba: ${supportedModels.join(', ')}`);
+                }
+                throw new Error(errorMsg);
+            }
+
+            const data = await response.json();
+            return data.candidates[0].content.parts[0].text || 'Maaf, tidak ada respons.';
+            
+        } catch (error) {
+            if (error.message.includes('not found') || error.message.includes('not supported')) {
+                // Coba model berikutnya
+                const nextIndex = supportedModels.indexOf(currentModel) + 1;
+                if (nextIndex < supportedModels.length) {
+                    currentModel = supportedModels[nextIndex];
+                    continue;
+                }
+                throw new Error(`Tidak ada model yang tersedia. Coba: ${supportedModels.join(', ')}`);
+            }
+            throw error;
         }
     }
-
-    const payload = {
-        contents: [{
-            parts: parts
-        }],
-        generationConfig: {
-            temperature: temperature,
-            maxOutputTokens: 2048,
-            topK: 40,
-            topP: 0.95
-        }
-    };
-
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error?.message || `HTTP ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data.candidates[0].content.parts[0].text || 'Maaf, tidak ada respons.';
+    
+    throw new Error('Gagal memanggil AI setelah mencoba beberapa model.');
 }
 
-// ===== UI HELPERS =====
+// ===== UI HELPERS (Sama seperti sebelumnya) =====
 function addMessage(role, content, files = []) {
     const div = document.createElement('div');
     div.className = `message ${role}`;
@@ -259,6 +284,7 @@ function saveApiKey() {
     apiKey = apiKeyInput.value.trim();
     localStorage.setItem('gemini_api_key', apiKey);
     alert('✅ API Key disimpan!');
+    updateStatus('ready');
 }
 
 function saveSystemPrompt() {
@@ -312,7 +338,78 @@ function fileToBase64(file) {
     });
 }
 
-// ===== AUTO-RESIZE TEXTAREA =====
+function handleFileUpload(e) {
+    const files = Array.from(e.target.files);
+    files.forEach(file => {
+        if (file.size > 5 * 1024 * 1024) {
+            alert(`File ${file.name} terlalu besar (max 5MB)`);
+            return;
+        }
+        uploadedFiles.push(file);
+        const tag = document.createElement('div');
+        tag.className = 'file-tag';
+        tag.innerHTML = `
+            📎 ${file.name} (${(file.size / 1024).toFixed(0)}KB)
+            <span class="remove-file" data-index="${uploadedFiles.length - 1}">×</span>
+        `;
+        filePreview.appendChild(tag);
+        tag.querySelector('.remove-file').addEventListener('click', (e) => {
+            const idx = parseInt(e.target.dataset.index);
+            uploadedFiles.splice(idx, 1);
+            // Refresh preview
+            filePreview.innerHTML = '';
+            uploadedFiles.forEach((f, i) => {
+                const newTag = document.createElement('div');
+                newTag.className = 'file-tag';
+                newTag.innerHTML = `
+                    📎 ${f.name} (${(f.size / 1024).toFixed(0)}KB)
+                    <span class="remove-file" data-index="${i}">×</span>
+                `;
+                filePreview.appendChild(newTag);
+                newTag.querySelector('.remove-file').addEventListener('click', (e) => {
+                    const idx = parseInt(e.target.dataset.index);
+                    uploadedFiles.splice(idx, 1);
+                    filePreview.innerHTML = '';
+                    uploadedFiles.forEach((f2, i2) => {
+                        const newTag2 = document.createElement('div');
+                        newTag2.className = 'file-tag';
+                        newTag2.innerHTML = `
+                            📎 ${f2.name} (${(f2.size / 1024).toFixed(0)}KB)
+                            <span class="remove-file" data-index="${i2}">×</span>
+                        `;
+                        filePreview.appendChild(newTag2);
+                        newTag2.querySelector('.remove-file').addEventListener('click', (e) => {
+                            const idx = parseInt(e.target.dataset.index);
+                            uploadedFiles.splice(idx, 1);
+                            filePreview.innerHTML = '';
+                            // Re-render semua
+                            uploadedFiles.forEach((f3, i3) => {
+                                const tag3 = document.createElement('div');
+                                tag3.className = 'file-tag';
+                                tag3.innerHTML = `
+                                    📎 ${f3.name} (${(f3.size / 1024).toFixed(0)}KB)
+                                    <span class="remove-file" data-index="${i3}">×</span>
+                                `;
+                                filePreview.appendChild(tag3);
+                                tag3.querySelector('.remove-file').addEventListener('click', (e) => {
+                                    const idx = parseInt(e.target.dataset.index);
+                                    uploadedFiles.splice(idx, 1);
+                                    filePreview.innerHTML = '';
+                                    // Re-render lagi...
+                                    // Simpel: reload file input
+                                    handleFileUpload(e);
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        });
+    });
+    fileInput.value = '';
+}
+
+// Auto-resize textarea
 messageInput.addEventListener('input', () => {
     messageInput.style.height = 'auto';
     messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
