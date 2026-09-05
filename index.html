@@ -3,18 +3,20 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AI Pribadi - Gemini</title>
+    <title>AI Pribadi - Gemini 2.0</title>
     <link rel="stylesheet" href="style.css" />
 </head>
 <body>
     <div id="app">
-        <!-- Sidebar Settings -->
         <div id="sidebar">
             <h2>⚙️ Pengaturan</h2>
             <div class="setting-group">
                 <label>🔑 API Key</label>
                 <input type="password" id="apiKeyInput" placeholder="Masukkan API Key" />
                 <button id="saveKeyBtn">Simpan</button>
+                <small style="display:block;margin-top:4px;color:#666;font-size:11px;">
+                    Dapatkan di <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#7c4dff;">Google AI Studio</a>
+                </small>
             </div>
             <div class="setting-group">
                 <label>📝 Prompt System</label>
@@ -25,11 +27,22 @@
                 <label>🌡️ Temperature</label>
                 <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.7" />
                 <span id="tempValue">0.7</span>
+                <small style="display:block;color:#666;font-size:11px;">0 = deterministik, 1 = kreatif</small>
+            </div>
+            <div class="setting-group">
+                <label>🤖 Model AI</label>
+                <select id="modelSelect" style="width:100%;padding:8px;background:#1e1e2e;border:1px solid #2a2a3a;border-radius:6px;color:#fff;">
+                    <option value="gemini-2.0-flash">✨ Gemini 2.0 Flash (Terbaru)</option>
+                    <option value="gemini-1.5-pro">🚀 Gemini 1.5 Pro</option>
+                    <option value="gemini-1.5-flash">⚡ Gemini 1.5 Flash</option>
+                </select>
             </div>
             <button id="clearChatBtn" class="danger-btn">🗑️ Hapus Chat</button>
+            <div style="margin-top:16px;padding:12px;background:#1a1a2e;border-radius:8px;font-size:12px;color:#888;">
+                💡 <strong>Tips:</strong> Jika error model, sistem akan otomatis coba model lain.
+            </div>
         </div>
 
-        <!-- Main Chat Area -->
         <div id="main">
             <div id="chatHeader">
                 <h1>🤖 AI Pribadi</h1>
@@ -49,4 +62,4 @@
     </div>
     <script src="script.js"></script>
 </body>
-</html>
+    </html>
